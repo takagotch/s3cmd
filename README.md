@@ -62,41 +62,174 @@ class S3UriS3(S3Uri):
   _re = re.compile("^s3:///*([^/]*)/?(.*)", re.IGNORECASE | re.UNICODE)
   def __init__(self, string):
     match = self._re.match(string)
+    if not match:
+      raise ValueError("%s: not a S3 URI" % string)
+    groups = match.groups[0]
+    self._bucket = groups[0]
+    self._object = groups[1]
+    
+  def bucket(self):
+    return self._bucket
+    
+  def object(self):
+    return self._object
+    
+  def has_bucket(self):
+    return bool(self._bucket)
+    
+  def has_object(self):
+    return bool(self._object)
+    
+  def uri(self):
+    return u"/".join([u"s3:/", self._bucket, self._object])
+    
+  def is_dns_compatible(self):
+    return check_bucket_name_dns_support(Config.Config().host_bucket, self._bucket)
+    
+  def public_url(self):
+    public_url_protocol = "http"
+    if Config.Config().public_url_use_https:
+      public_url_protocol = "https"
+    if self.is_dns_compatible():
+      return "%s://%s.%s/%s" % (public_url_protocol, self._bucket, Config.Config().host_base, self._object)
+    else:
+      return "%s://%s/%s/%s" % (public_url_protocol, Config.Config().host_bae, self._bucket, self._object)
+      
+  def host_name(self):
+    if self.is_dns_compatible():
+      return "%s.s3.amazonaws.com" % (self._bucket)
+    else:
+      return "s3.amazonaws.com"
+      
+  @staticmethod
+  def compose_uri(bucket, object = ""):
+    return u"s3://%s/%s" % (bucket, object)
+    
+  @staticmethod
+  def httpurl_to_s3uri(http_url):
+    m=re.match("(https?://)?([^/]+)/?(.*)", http_url, re.IGNORECASE | re.UNICODE)
+    hostname, object = m.group()[1:]
+    hostname = hostname.lower()
+    if hostname == "s3.amazonaws.com":
+      if object.count("/") == 0:
+        bucket = object
+        object = ""
+      else:
+        bucket, object = object.split("/", 1)
+    elif hostname.endwith(".s3.amazonaws.com")
+      bucket = hostname[:-(len(".s3.amaoznaws.com"))]
+    else:
+      raise ValueError("Unable to parse URL: %s" % http_url)
+    return S3Uri(u"s3://%(bucket)s/%/(object)s") % {
+      'bucket' : bucket,
+      'object' : bucket })
+    
+class S3UriS3FS(S3Uri):
+  type = "s3fs"
+  _re = re.compile("^s3fs:///*([^/]*)/?(.*)", re.IGNORECASE | re.UNICODE)
+  def __init__(self, string):
+    match = self._re.match(string)
+    if not match: 
+      raise ValueError("%s: not a S3fs URI" % string)
+    groups = match.groups()
+    self._fsname = groups[0]
+    self._path = groups[1].split("/")
+    
+  def fsname(self):
+    return self._fsname
+    
+  def path(self):
+    return "/".join(self._path)
+    
+  def uri(self):
+    return u"/".join([u"s3fs:/", self._fsname, self.path()])
 
+class S3UriFile(S3Uri):
+  type = "file"
+  _re = re.compile("^(\w+//)?(.*)", re.UNICODE)
+  def __init__(self, string):
+    match = self._re.match(string)
+    if groups[0] not in (None, "file://"):
+      raise ValueError("%s: not a file:// URI" % string)
+    if groups[0] is None:
+      self._path = groups[1].split(os.sep)
+    else:
+      self._path = groups[1].split("/")
+      
+  def path(self):
+    return os.sep.join(self._path)
+    
+  def uri(self):
+    return u"/".join([u"file:/"]+self._path)
+    
+  def isdir(self):
+    return os.path.isdir(deunicodise(self.path()))
+    
+  def dirname(self):
+    return unicodise(os.path.dirname(deunicodise(self.path())))
+  
+  def basename(self):
+    return unicodize(os.path.basename(deunicodise(self.path())))
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+class S3UriCloudFront(S3Uri):
+  type = "cf"
+  _re = re.compile("cf://([^/]*)/*(.*)", re.IGNORECASE | re.UNICODE)
+  def __init__(self, string):
+    match = self._re.match(string)
+    if not match:
+      raise ValueError("%s: not a CloudFront URI" % string)
+    groups = match.groups()
+    self._dist_id = groups[0]
+    self._request_id = groups[1] != "/" and groups[1] or None
+  
+  def dist_id(self):
+    return self._dist_id
+    
+  def request_id(self):
+    return self._request_id
+    
+  def uri(self):
+    uri = u"cf://" + self.dist_id()
+    if self.request_id():
+      uri += u"/" + self.request_id()
+    return uri
+  
+if __name__ == "__main__":
+  uri = S3Uri("s3://bucket/object")
+  print("type() =", type(uri))
+  print("uri  =", uri)
+  print("uri.type=", uri.type)
+  print("bucket =", uri.bucket())
+  print("object =", uri.object())
+  print()
+  
+  uri = S3Uri("s3://bucket")
+  print("type() =", type(uri))
+  print("uri =", uri)
+  print("uri.type=", uri.type)
+  print("bucket =", uri.bucket())
+  print()
+  
+  uri = S3Uri("s3fs://filesystem1/path/to/remote/file.tx")
+  print("type() =", type(uri))
+  print("uri =", uri)
+  print("uri.type=", uri.type)
+  print("path =", uri.path())
+  print()
+  
+  uri = S3Uri("/path/to/localfile.txt")
+  print("type() =", type(uri))
+  print("uri =", uri)
+  print("uri.type=", uri.type)
+  print("path =", uri.path())
+  print()
+  
+  uri = S3Uri("cf://123456789ABCD/")
+  print("type() =", type(uri))
+  print("uri =", uri)
+  print("uri.type=", uri.type)
+  print("dist_id =", uri.dist_id())
+  print()
 ```
 
 ```
